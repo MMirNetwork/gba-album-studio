@@ -39,9 +39,10 @@ info_screen = """void showGSMPlayerCopyrightInfo() {
 }"""
 s, n = re.subn(r'void\s+showGSMPlayerCopyrightInfo\s*\(\s*(?:void\s*)?\)\s*\{[^}]*\}', lambda m: info_screen, s)
 assert n == 1, 'Upstream info screen changed'
-# The info page uses row zero, which upstream playback normally leaves blank.
-# Clear it when returning to the player so the branding does not remain there.
-s, n = re.subn(r'(void\s+hud_show_instructions\s*\(\s*(?:void\s*)?\)\s*\{)', lambda m: m.group(1) + '\n  hud_wline(0, "");', s)
+# Playback redraws rows 1-7 and the status line in row 9. The expanded
+# info page also writes rows 0 and 8: clear both on return. Do NOT clear
+# row 9 here; main.c has already drawn the current title and time there.
+s, n = re.subn(r'(void\s+hud_show_instructions\s*\(\s*(?:void\s*)?\)\s*\{)', lambda m: m.group(1) + '\n  hud_wline(0, "");\n  hud_wline(8, "");', s)
 assert n == 1, 'Upstream controls screen changed'
 p.write_text(s)
 print('Player adapted: cartridge linking, fixed-size ROM fields, bounded title rendering.')

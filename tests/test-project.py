@@ -19,9 +19,28 @@ with tempfile.TemporaryDirectory() as td:
     assert info.index('MMirNetwork')<info.index('Damian Yerrick')<info.index('Ben Wiley')
     assert 'J. Degener & C. Bormann' in info and 'and Toast contributors' in info
     assert '(See TOAST-COPYRIGHT.txt)' in info
-    assert 'hud_wline(0, "");' in hud[hud.index('void hud_show_instructions'):]
+    controls = hud[hud.index('void hud_show_instructions'):]
+    assert 'hud_wline(0, "");' in controls
+    assert 'hud_wline(8, "");' in controls
+    assert not re.search(r'hud_wline\(9,\s*""\)', controls)
+    # Replay the literal row writes to model repeated info -> playback changes.
+    # Rows 1-7 are refreshed by upstream; row 9 by drawHUDFrame before controls.
+    def apply_literals(body, screen):
+        for row, text in re.findall(r'hud_wline\((\d+),\s*"([^"\n]*)"\)', body):
+            screen[int(row)] = text
+    screen = [''] * 10
+    for _ in range(5):
+        apply_literals(info, screen)
+        assert screen[8] == 'and Toast contributors'
+        screen[9] = '01 Track title 00:12'
+        for row in range(1, 8):
+            screen[row] = 'Controls' if row <= 5 else ''
+        apply_literals(controls, screen)
+        assert screen[0] == screen[8] == ''
+        assert screen[9] == '01 Track title 00:12'
+
     assert '\x00' not in (p/'src/libgsm.c').read_text()
-    print('PASS: info rows fit GBA, MMirNetwork first, upstream credits retained, return-to-player row cleared.')
+    print('PASS: info rows fit GBA, MMirNetwork first, upstream credits retained, return-to-player rows 0/8 cleared, status preserved over five transitions.')
 with tempfile.TemporaryDirectory() as td:
     p=Path(td)
     for folder in ['scripts','web']:
