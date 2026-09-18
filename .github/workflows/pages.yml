@@ -1,0 +1,85 @@
+name: Build GBA Album Studio and deploy Pages
+on:
+  push:
+    branches: [main, new-ui, web-ui]
+    paths:
+      - 'web/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: gba-album-pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test browser packing and syntax
+        run: |
+          node tests/test-web.cjs
+          python3 tests/test-project.py
+      - name: Fetch pinned upstream player
+        uses: actions/checkout@v4
+        with:
+          repository: benwiley4000/gsmplayer-gba
+          ref: b159d5d415fd49efca50ff6d539d9b55487f0cce
+          path: vendor/player
+          persist-credentials: false
+      - name: Fetch and verify libgsm
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p vendor/gsm build
+          curl --fail --location --retry 3 --proto '=https' --tlsv1.2 https://www.quut.com/gsm/gsm-1.0.24.tar.gz -o build/gsm.tar.gz
+          echo 'a3c40c6471928383f4abfcb2e8f24012a1f562be2f17b8d672145d5986681a92  build/gsm.tar.gz' | sha256sum --check
+          tar -xzf build/gsm.tar.gz --strip-components=1 -C vendor/gsm
+      - name: Adapt upstream player
+        run: python3 scripts/prepare-player.py vendor/player
+      - name: Compile GBA cartridge template
+        run: docker run --rm -v "$PWD:/work" -w /work devkitpro/devkitarm:latest bash scripts/build-player.sh
+      - name: Compile single-file GSM WebAssembly encoder
+        run: docker run --rm -v "$PWD:/work" -w /work emscripten/emsdk:3.1.64 bash scripts/build-encoder.sh
+      - name: Verify encoder and embed all runtime assets
+        run: |
+          node tests/test-encoder.cjs
+          python3 scripts/package-site.py
+          node tests/test-web.cjs dist/index.html
+          node tests/test-built.cjs
+      - name: Browser end-to-end tests
+        run: |
+          npm install --no-save --no-package-lock playwright@1.51.1
+          npx playwright install --with-deps chromium
+          node tests/test-browser.cjs
+      - name: Save built site and smoke-test ROM
+        uses: actions/upload-artifact@v4
+        with:
+          name: gba-album-studio-site
+          path: |
+            dist
+            build/smoke-test.gba
+          if-no-files-found: error
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy static site
+        id: deployment
+        uses: actions/deploy-pages@v4
